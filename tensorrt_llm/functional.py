@@ -20,6 +20,7 @@ from functools import partial
 from typing import List, Optional, Sequence, Tuple, Union
 
 import numpy as np
+import sys
 
 # isort: off
 import torch
@@ -30,7 +31,7 @@ from . import graph_rewriting as gw
 from ._common import default_net, default_trtnet, precision
 from ._utils import (bf16_array, dim_resolve_negative, dim_to_trt_axes,
                      fp16_array, fp32_array, int32_array, np_dtype_to_trt,
-                     str_dtype_to_np, str_dtype_to_trt, torch_to_numpy,
+                     str_dtype_to_np, str_dtype_to_trt, str_dtype_to_torch, torch_to_numpy,
                      trt_dtype_to_np, trt_dtype_to_torch)
 from .logger import logger
 from .network import PluginInfo, set_np_weight, set_plugin_info
@@ -120,8 +121,10 @@ class Tensor(object):
                  dtype=None,
                  shape=None,
                  dim_range=None,
-                 is_network_input=True,
-                 location=trt.TensorLocation.DEVICE,
+                 #is_network_input=True,
+                 #location=trt.TensorLocation.DEVICE,
+                 is_network=False,
+                 location='cpu',
                  network=None,
                  trt_tensor=None):
         '''
@@ -187,58 +190,65 @@ class Tensor(object):
 
         # work as a wrapper for a trt.ITensor, this is used specially in the graph rewriter
         if trt_tensor is not None:
-            self.is_tensor_wrapper = True
-            assert network is not None
+            #self.is_tensor_wrapper = True
+            #assert network is not None
             self.trt_tensor = trt_tensor
-            self._network = weakref.ref(network)
-            assert not is_network_input, "is_network_input should be False when trt_tensor is not None"
+            self.dtype = dtype
+            self.location = location
+            self.name = name
+            #self._network = weakref.ref(network)
+            #assert not is_network_input, "is_network_input should be False when trt_tensor is not None"
             return
+        else:
+            raise Exception("ERROR: please initialize Tensor with torch.Tensor")
 
         # be cautious here, the weakref is critical to avoid circular referencing before Network and Tensor
         # using strong reference will likely cause significant peak memory increase, since Network objects
         # holds the weights data.
-        self._network = weakref.ref(default_net())
-        if is_network_input:
-            if dim_range is not None:
-                assert isinstance(dim_range, OrderedDict)
-                assert len(
-                    dim_range
-                ) >= 1, f"Each input tensor shall have at least one dimension, tensor '{name}' found {dim_range=}"
+        #self._network = weakref.ref(default_net())
+        #if is_network_input:
+        #    if dim_range is not None:
+        #        assert isinstance(dim_range, OrderedDict)
+        #        assert len(
+        #            dim_range
+        #        ) >= 1, f"Each input tensor shall have at least one dimension, tensor '{name}' found {dim_range=}"
 
-                found_profiles = [
-                    len(ranges) for _, ranges in dim_range.items()
-                ]
-                assert all(
-                    [x == found_profiles[0] for x in found_profiles]
-                ), f"Expecting all the dimensions in the dim_range has same number of profiles, tensor '{name}' got {dim_range=}"
+        #        found_profiles = [
+        #            len(ranges) for _, ranges in dim_range.items()
+        #        ]
+        #        assert all(
+        #            [x == found_profiles[0] for x in found_profiles]
+        #        ), f"Expecting all the dimensions in the dim_range has same number of profiles, tensor '{name}' got {dim_range=}"
 
-                num_opt_profile = len(list(dim_range.items())[0][1])
-                assert num_opt_profile >= 1
-                for i in range(num_opt_profile):
-                    range_shape = []
-                    dimension_names = []
-                    for dim, ranges in dim_range.items():
-                        assert isinstance(ranges, (list, tuple))
-                        range_shape.append(ranges[i])
-                        dimension_names.append(dim)
-                    self.profiles.append(DimRange(range_shape, dimension_names))
+        #        num_opt_profile = len(list(dim_range.items())[0][1])
+        #        assert num_opt_profile >= 1
+        #        for i in range(num_opt_profile):
+        #            range_shape = []
+        #            dimension_names = []
+        #            for dim, ranges in dim_range.items():
+        #                assert isinstance(ranges, (list, tuple))
+        #                range_shape.append(ranges[i])
+        #                dimension_names.append(dim)
+        #            self.profiles.append(DimRange(range_shape, dimension_names))
 
-            default_net()._add_input(self, name, dtype, shape, dim_range)
-            self.name = name
-            self.dtype = dtype
-            self.shape = shape
-            self.location = location
+        #    default_net()._add_input(self, name, dtype, shape, dim_range)
+        #    self.name = name
+        #    self.dtype = dtype
+        #    self.shape = shape
+        #    self.location = location
 
     @property
     def network(self):
-        return self._network()
+        #return self._network()
+        return None
 
     @property
     def name(self):
         '''
         The name of the tensor.
         '''
-        return self.trt_tensor.name
+        #return self.trt_tensor.name
+        return None
 
     @name.setter
     def name(self, name):
@@ -261,7 +271,7 @@ class Tensor(object):
         Set the type of the elements in the tensor.
         '''
         if dtype is not None:
-            self.trt_tensor.dtype = dtype
+            self.trt_tensor.type(str_dtype_to_torch(dtype))
 
     @property
     def shape(self):
@@ -283,15 +293,18 @@ class Tensor(object):
         '''
         The physical location of the tensor (on the host or the device).
         '''
-        return self.trt_tensor.location
+        return self.trt_tensor.device
 
     @location.setter
     def location(self, location):
         '''
         Set the physical location of the tensor (on the host or the device). See __init__.
         '''
+        #if location is not None:
+        #    self.trt_tensor.location = location
         if location is not None:
-            self.trt_tensor.location = location
+            if isinstance(location, str):
+                self.trt_tensor.to(location)
 
     def mark_output(self,
                     name: Optional[str] = None,
@@ -320,126 +333,128 @@ class Tensor(object):
         '''
         See functional.add.
         '''
-        return add(self, b)
+        #return add(self, b)
+        return torch.add(self.trt_tensor, b)
 
     def __radd__(self, b):
         '''
         See functional.add.
         '''
-        return add(b, self)
+        return torch.add(b, self.trt_tensor) #add(b, self)
 
     def __sub__(self, b):
         '''
         See functional.sub.
         '''
-        return sub(self, b)
+        return torch.sub(self.trt_tensor, b) #sub(self, b)
 
     def __rsub__(self, b):
         '''
         See functional.sub.
         '''
-        return sub(b, self)
+        return torch.sub(b, self.trt_tensor) #sub(b, self)
 
     def __mul__(self, b):
         '''
         See functional.mul.
         '''
-        return mul(self, b)
+        return torch.mul(self.trt_tensor, b) #mul(self, b)
 
     def __rmul__(self, b):
         '''
         See functional.mul.
         '''
-        return mul(b, self)
+        return torch.mul(b, self.trt_tensor) #mul(b, self)
 
     def __truediv__(self, b):
         '''
         See functional.div.
         '''
-        return div(self, b)
+        return torch.div(self.trt_tensor, b) #div(self, b)
 
     def __lt__(self, b):
         '''
         See functional.lt.
         '''
-        return lt(self, b)
+        return torch.lt(self.trt_tensor, b) #lt(self, b)
 
     def __gt__(self, b):
         '''
         See functional.gt.
         '''
-        return gt(self, b)
+        return torch.gt(self.trt_tensor, b) #gt(self, b)
 
     def __eq__(self, b):
         '''
         See functional.eq.
         '''
-        if self.is_tensor_wrapper:
-            # for graph rewriter
-            return hash(self) == hash(b)
-        else:
-            # for creating the network
-            return eq(self, b)
+        #if self.is_tensor_wrapper:
+        #    # for graph rewriter
+        #    return hash(self) == hash(b)
+        #else:
+        #    # for creating the network
+        #    return eq(self, b)
+        return torch.equal(self, b)
 
     def __ge__(self, b):
         '''
         Maps to functional.gt or functional.eq.
         '''
-        return op_or(self.__gt__(b), self.__eq__(b))
+        return torch.ge(self.trt_tensor, b) #op_or(self.__gt__(b), self.__eq__(b))
 
     def __le__(self, b):
         '''
         Maps to functional.lt or functional.eq.
         '''
-        return op_or(self.__lt__(b), self.__eq__(b))
+        return torch.le(self.trt_tensor, b)  #op_or(self.__lt__(b), self.__eq__(b))
 
     def view(self, shape, zero_is_placeholder=True):
         '''
         See functional.view.
         '''
-        return view(self, shape, zero_is_placeholder)
+        return torch.view(self.trt_tensor, shape) #view(self, shape, zero_is_placeholder)
 
     def permute(self, dims):
         '''
         See functional.permute.
         '''
-        return permute(self, dims)
+        return torch.permute(self.trt_tensor, dims) #permute(self, dims)
 
     def transpose(self, dim0, dim1):
         '''
         See functional.transpose.
         '''
-        return transpose(self, dim0, dim1)
+        return torch.transpose(self.trt_tensor, dim0, dim1) #transpose(self, dim0, dim1)
 
     def mean(self, dim, keepdim=False):
         '''
         See functional.mean.
         '''
-        return mean(self, dim, keepdim)
+        return torch.mean(self.trt_tensor, dim, keepdim) #mean(self, dim, keepdim)
 
     def max(self, dim, keepdim=False):
         '''
         See functional.max.
         '''
-        return max(self, dim, keepdim)
+        return torch.max(self.trt_tensor, dim, keepdim) #max(self, dim, keepdim)
 
     def abs(self):
         '''
         See functional.abs.
         '''
-        return abs(self)
+        return torch.abs(self.trt_tensor) #abs(self)
 
     def sqrt(self):
         '''
         See functional.sqrt.
         '''
-        return sqrt(self)
+        return torch.sqrt(self.trt_tensor) #sqrt(self)
 
     def cast(self, dtype):
         '''
         See functional.cast.
         '''
-        return cast(self, dtype)
+        return self.trt_tensor.to(dtype) #cast(self, dtype)
 
     def size(self, dim=None):
         '''
@@ -463,13 +478,13 @@ class Tensor(object):
         '''
         Returns the rank (i.e. the number of dimensions) of the tensor.
         '''
-        return self.rank()
+        return self.trt_tensor.ndim() #self.rank()
 
     def split(self, split_size_or_sections, dim=0):
         '''
         See functional.split.
         '''
-        return split(self, split_size_or_sections, dim)
+        return torch.split(self.trt_tensor, split_size_or_sections, dim) #split(self, split_size_or_sections, dim)
 
     def is_dynamic(self, dim=None):
         '''
@@ -480,54 +495,54 @@ class Tensor(object):
         functions returns a boolean that indicates if the dimension 'dim' is
         dynamic (True) or not (False).
         '''
-        if dim is not None:
-            return self.trt_tensor.shape[dim] == -1
+        #if dim is not None:
+        #    return self.trt_tensor.shape[dim] == -1
 
-        for i, s in enumerate(self.trt_tensor.shape):
-            if i != 0 and s == -1:
-                return True
+        #for i, s in enumerate(self.trt_tensor.shape):
+        #    if i != 0 and s == -1:
+        #        return True
 
         return False
 
     # graph writer related functions
 
-    def get_parent(self):
-        ''' Get the layer that produces this tensor.  '''
-        return self.network.get_tensor_parent(self)
+    #def get_parent(self):
+    #    ''' Get the layer that produces this tensor.  '''
+    #    return self.network.get_tensor_parent(self)
 
-    def get_users(self):
-        ''' Get the layers that use this tensor as an input.  '''
-        return self.network.get_tensor_users(self)
+    #def get_users(self):
+    #    ''' Get the layers that use this tensor as an input.  '''
+    #    return self.network.get_tensor_users(self)
 
-    def replace_all_uses_with(self, new_tensor):
-        '''
-        Replace all uses of this tensor as an input to consumer layers
-        '''
+    #def replace_all_uses_with(self, new_tensor):
+    #    '''
+    #    Replace all uses of this tensor as an input to consumer layers
+    #    '''
 
-        self.network.is_graph_altered = True
-        users = self.get_users()
-        for user in users:
-            inputs_changed = 0
-            for i in range(user.num_inputs):
-                if user.get_inputs(i)[0].trt_tensor is self.trt_tensor:
-                    inputs_changed += 1
-                    user.set_input(i, new_tensor.trt_tensor)
-            assert inputs_changed >= 1, "Tensor not found in layer inputs"
+    #    self.network.is_graph_altered = True
+    #    users = self.get_users()
+    #    for user in users:
+    #        inputs_changed = 0
+    #        for i in range(user.num_inputs):
+    #            if user.get_inputs(i)[0].trt_tensor is self.trt_tensor:
+    #                inputs_changed += 1
+    #                user.set_input(i, new_tensor.trt_tensor)
+    #        assert inputs_changed >= 1, "Tensor not found in layer inputs"
 
-            # update the FLayerMetadata as well
-            flayer = gw.FLayerInfoMemo.instance().get(user.name)
-            flayer and flayer.replace_input_with(self, new_tensor)
+    #        # update the FLayerMetadata as well
+    #        flayer = gw.FLayerInfoMemo.instance().get(user.name)
+    #        flayer and flayer.replace_input_with(self, new_tensor)
 
-    def is_trt_wrapper(self):
-        '''
-        Check if there is a trt.ITensor member inside, which is required for
-        graph rewriter. In order to differentiate usages, it may be necessary
-        to have an inheritance hierarchy.
-        '''
-        if hasattr(self, 'trt_tensor'):
-            return True
-        else:
-            return False
+    #def is_trt_wrapper(self):
+    #    '''
+    #    Check if there is a trt.ITensor member inside, which is required for
+    #    graph rewriter. In order to differentiate usages, it may be necessary
+    #    to have an inheritance hierarchy.
+    #    '''
+    #    if hasattr(self, 'trt_tensor'):
+    #        return True
+    #    else:
+    #        return False
 
     def __hash__(self):
         if self.is_trt_wrapper():
@@ -539,8 +554,10 @@ class Tensor(object):
         return f"TensorRT-LLM Tensor: {self.name=} {self.dtype=} {self.shape=}"
 
 
-def _create_tensor(trt_tensor: trt.ITensor,
-                   producer: trt.ILayer = None) -> Tensor:
+#def _create_tensor(trt_tensor: trt.ITensor,
+#                   producer: trt.ILayer = None) -> Tensor:
+def _create_tensor(trt_tensor: torch.Tensor,
+                    producer=None) -> Tensor:
     '''
     A helper function to create a TensorRT-LLM Tensor object that encapsulates
     the connection between the TensorRT tensor (trt.ITensor) and the layer
@@ -570,27 +587,28 @@ def _create_tensor(trt_tensor: trt.ITensor,
         attribute 'producer'.
     '''
     assert trt_tensor is not None
-    tensor = Tensor(name=trt_tensor.name,
-                    dtype=trt_tensor.dtype,
-                    shape=trt_tensor.shape,
-                    is_network_input=False)
+    #tensor = Tensor(name=trt_tensor.name,
+    #                dtype=trt_tensor.dtype,
+    #                shape=trt_tensor.shape,
+    #                is_network_input=False)
+    tensor = Tensor(trt_tensor=trt_tensor, dtype=trt_tensor.dtype, shape=trt_tensor.shape)
     tensor.trt_tensor = trt_tensor
     tensor.producer = producer
 
     # Set the layer name since this is the only
     # centralized location to pass the name from
     # module space to the TRT IR
-    default_net()._set_layer_name(producer)
-    if default_net().dtype is not None and not default_net().strongly_typed:
-        if producer.type not in [
-                trt.LayerType.SHAPE, trt.LayerType.CONSTANT,
-                trt.LayerType.GATHER, trt.LayerType.CONCATENATION
-        ]:
-            producer.precision = default_net().dtype
-    assert tensor is not None
+    #default_net()._set_layer_name(producer)
+    #if default_net().dtype is not None and not default_net().strongly_typed:
+    #    if producer.type not in [
+    #            trt.LayerType.SHAPE, trt.LayerType.CONSTANT,
+    #            trt.LayerType.GATHER, trt.LayerType.CONCATENATION
+    #    ]:
+    #        producer.precision = default_net().dtype
+    #assert tensor is not None
 
-    if gw.FLayerInfoMemo.instance().cur_flayer is not None:
-        gw.FLayerInfoMemo.instance().cur_flayer.layer_name = producer.name
+    #if gw.FLayerInfoMemo.instance().cur_flayer is not None:
+    #    gw.FLayerInfoMemo.instance().cur_flayer.layer_name = producer.name
 
     return tensor
 
@@ -661,7 +679,8 @@ class MLPType(IntEnum):
     FusedGatedMLP = 2
 
 
-def activation(input: Tensor, act_type: trt.ActivationType) -> Tensor:
+#def activation(input: Tensor, act_type: trt.ActivationType) -> Tensor:
+def activation(input: Tensor, act_type: 'str') -> Tensor:
     '''
     Add an activation function.
 
@@ -681,8 +700,16 @@ def activation(input: Tensor, act_type: trt.ActivationType) -> Tensor:
     Returns:
         The tensor produced by the activation layer.
     '''
-    layer = default_trtnet().add_activation(input.trt_tensor, act_type)
-    return _create_tensor(layer.get_output(0), layer)
+    #layer = default_trtnet().add_activation(input.trt_tensor, act_type)
+    #return _create_tensor(layer.get_output(0), layer)
+    if act_type == 'relu':
+        return torch.nn.functional.relu(input.trt_tensor)
+    elif act_type == 'tanh':
+        return torch.tanh(input.trt_tensor)
+    elif act_type == 'sigmoid':
+        return torch.sigmoid(input.trt_tensor)
+    else:
+        raise Exception("ERROR: unsupported activation type {}".format(act_type))
 
 
 def clip(input: Tensor, alpha: float, beta: float) -> Tensor:
@@ -786,9 +813,10 @@ def cast(input: Tensor, dtype: Union[str, trt.DataType]):
         The tensor produced by the inserted layer.
     '''
     if isinstance(dtype, str):
-        cvt_dtype = str_dtype_to_trt(dtype)
+        cvt_dtype = str_dtype_to_torch(dtype) #str_dtype_to_trt(dtype)
     elif isinstance(dtype, trt.DataType):
-        cvt_dtype = dtype
+        #cvt_dtype = dtype
+        raise Exception("ERROR: not supporting trt Datatype")
     else:
         raise TypeError("%s is not supported" % type(dtype))
 
@@ -796,15 +824,16 @@ def cast(input: Tensor, dtype: Union[str, trt.DataType]):
         # If input type and cast dtype are the same, do nothing
         return input
 
-    layer = default_trtnet().add_cast(input.trt_tensor, cvt_dtype)
-    if not default_net().strongly_typed:
-        layer.set_output_type(0, cvt_dtype)
-    output = _create_tensor(layer.get_output(0), layer)
-    if input.dtype == str_dtype_to_trt('int8'):
-        layer.get_input(0).set_dynamic_range(-127, 127)
-    if cvt_dtype == str_dtype_to_trt('int8'):
-        layer.get_output(0).set_dynamic_range(-127, 127)
+    #layer = default_trtnet().add_cast(input.trt_tensor, cvt_dtype)
+    #if not default_net().strongly_typed:
+    #    layer.set_output_type(0, cvt_dtype)
+    #output = _create_tensor(layer.get_output(0), layer)
+    #if input.dtype == str_dtype_to_trt('int8'):
+    #    layer.get_input(0).set_dynamic_range(-127, 127)
+    #if cvt_dtype == str_dtype_to_trt('int8'):
+    #    layer.get_output(0).set_dynamic_range(-127, 127)
 
+    output = input.cast(cvt_dtype)
     return output
 
 
