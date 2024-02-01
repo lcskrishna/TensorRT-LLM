@@ -1019,20 +1019,29 @@ def matmul(input: Tensor,
     '''
     # This option is only supported for fp16, but not bf16 or any other precisions.
     # TODO: fp32 accum has issues with strongly_typed and it will be fixed in TensorRT 10.0
-    use_fp32_acc = use_fp32_acc and input.dtype == trt.DataType.HALF and mat2.dtype == trt.DataType.HALF and not default_net(
-    ).strongly_typed
+    #use_fp32_acc = use_fp32_acc and input.dtype == trt.DataType.HALF and mat2.dtype == trt.DataType.HALF and not default_net(
+    #).strongly_typed
+    use_fp32_acc = use_fp32_acc and input.dtype == torch.half and mat2.dtype == torch.half
     if use_fp32_acc:
         input = cast(input, 'float32')
         mat2 = cast(mat2, 'float32')
 
-    input, mat2 = broadcast_helper(input, mat2)
-    op0 = trt.MatrixOperation.TRANSPOSE if transa \
-        else trt.MatrixOperation.NONE
-    op1 = trt.MatrixOperation.TRANSPOSE if transb \
-        else trt.MatrixOperation.NONE
-    layer = default_trtnet().add_matrix_multiply(input.trt_tensor, op0,
-                                                 mat2.trt_tensor, op1)
-    output = _create_tensor(layer.get_output(0), layer)
+    #input, mat2 = broadcast_helper(input, mat2)
+    #op0 = trt.MatrixOperation.TRANSPOSE if transa \
+    #    else trt.MatrixOperation.NONE
+    #op1 = trt.MatrixOperation.TRANSPOSE if transb \
+    #    else trt.MatrixOperation.NONE
+    #layer = default_trtnet().add_matrix_multiply(input.trt_tensor, op0,
+    #                                             mat2.trt_tensor, op1)
+    #output = _create_tensor(layer.get_output(0), layer)
+    #if use_fp32_acc:
+    #    output = cast(output, "float16")
+    if transa:
+        input.trt_tensor = torch.transpose(input.trt_tensor, 0, 1)
+    if transb:
+        mat2.trt_tensor = torch.transpose(mat2.trt_tensor, 0, 1)
+    
+    output = _create_tensor(torch.matmul(input.trt_tensor, mat2.trt_tensor))
     if use_fp32_acc:
         output = cast(output, "float16")
 

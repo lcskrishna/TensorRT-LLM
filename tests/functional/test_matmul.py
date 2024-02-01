@@ -45,31 +45,31 @@ class TestMatmul(unittest.TestCase):
         shape2 = (n, k) if tb else (k, n)
         mat2 = torch.randn(
             shape2, dtype=tensorrt_llm._utils.str_dtype_to_torch(dtype)) * 1e-1
-        builder = tensorrt_llm.Builder()
-        net = builder.create_network()
-        with tensorrt_llm.net_guard(net):
-            network = tensorrt_llm.default_trtnet()
-            x = Tensor(name='x',
-                       shape=mat1.shape,
-                       dtype=tensorrt_llm.str_dtype_to_trt(dtype))
-            y = Tensor(name='y',
-                       shape=mat2.shape,
-                       dtype=tensorrt_llm.str_dtype_to_trt(dtype))
-            output = tensorrt_llm.functional.matmul(x, y, transa=ta,
+        #builder = tensorrt_llm.Builder()
+        #net = builder.create_network()
+        #with tensorrt_llm.net_guard(net):
+        #    network = tensorrt_llm.default_trtnet()
+        x = Tensor(trt_tensor=mat1,
+                    shape=mat1.shape,
+                    dtype=dtype)#tensorrt_llm.str_dtype_to_trt(dtype))
+        y = Tensor(trt_tensor=mat2,
+                   shape=mat2.shape,
+                   dtype=dtype)#tensorrt_llm.str_dtype_to_trt(dtype))
+        output = tensorrt_llm.functional.matmul(x, y, transa=ta,
                                                     transb=tb).trt_tensor
-            output.name = 'output'
-            network.mark_output(output)
-            output.dtype = tensorrt_llm.str_dtype_to_trt(dtype)
+            #output.name = 'output'
+            #network.mark_output(output)
+            #output.dtype = tensorrt_llm.str_dtype_to_trt(dtype)
 
-        build_engine = EngineFromNetwork(
-            (builder.trt_builder, net.trt_network),
-            config=CreateConfig(
-                fp16=(dtype == 'float16'),
-                bf16=(dtype == 'bfloat16'),
-                precision_constraints='obey',
-                memory_pool_limits={trt.MemoryPoolType.WORKSPACE: 33554432}))
-        with TrtRunner(build_engine) as runner:
-            outputs = runner.infer(feed_dict={'x': mat1, 'y': mat2})
+        #build_engine = EngineFromNetwork(
+        #    (builder.trt_builder, net.trt_network),
+        #    config=CreateConfig(
+        #        fp16=(dtype == 'float16'),
+        #        bf16=(dtype == 'bfloat16'),
+        #        precision_constraints='obey',
+        #        memory_pool_limits={trt.MemoryPoolType.WORKSPACE: 33554432}))
+        #with TrtRunner(build_engine) as runner:
+        #    outputs = runner.infer(feed_dict={'x': mat1, 'y': mat2})
 
         if ta:
             mat1 = mat1.cuda().transpose(0, 1)
@@ -99,9 +99,10 @@ class TestMatmul(unittest.TestCase):
             mat2 = mat2.cpu()
 
         ref = torch.matmul(mat1, mat2).to(torch.float32)
-        np.testing.assert_allclose(ref.cpu().numpy(),
-                                   outputs['output'].to(torch.float32),
-                                   **tols[dtype])
+        #np.testing.assert_allclose(ref.cpu().numpy(), output.cpu().numpy(), **tols[dtype])
+        assert torch.allclose(ref.cpu().float(), output.cpu().float(), **tols[dtype])
+                                   #outputs['output'].to(torch.float32),
+                                   #**tols[dtype])
 
     @parameterized.expand([('float16', False, False), ('float16', False, True),
                            ('float16', True, False), ('float16', True, True),
@@ -115,10 +116,10 @@ class TestMatmul(unittest.TestCase):
         tp = 1
 
         # Skip tests that are not supported in pre-ampere architecture
-        if getSMVersion() < 80:
-            if dtype == 'bfloat16':
-                pytest.skip(
-                    "bfloat16 is not supported in pre-ampere architecture")
+        #if getSMVersion() < 80:
+        #if dtype == 'bfloat16':
+        #    pytest.skip(
+        #        "bfloat16 is not supported in pre-ampere architecture")
 
         # qkv_gemm
         self._matmul(bs * inseq, 3 * hidden_size // tp, hidden_size, dtype,
@@ -133,28 +134,30 @@ class TestMatmul(unittest.TestCase):
         x_data = torch.randn(16, 4, 4, 5)
         y_data = torch.randn(16, 1, 5, 4)
 
-        builder = tensorrt_llm.Builder()
-        net = builder.create_network()
-        with tensorrt_llm.net_guard(net):
-            network = tensorrt_llm.default_trtnet()
-            x = Tensor(name='x',
-                       shape=x_data.shape,
-                       dtype=tensorrt_llm.str_dtype_to_trt(dtype))
-            y = Tensor(name='y',
-                       shape=y_data.shape,
-                       dtype=tensorrt_llm.str_dtype_to_trt(dtype))
-            output = tensorrt_llm.functional.matmul(x, y).trt_tensor
-            output.name = 'output'
-            network.mark_output(output)
+        #builder = tensorrt_llm.Builder()
+        #net = builder.create_network()
+        #with tensorrt_llm.net_guard(net):
+        #    network = tensorrt_llm.default_trtnet()
+        x = Tensor(trt_tensor=x_data,
+                   shape=x_data.shape,
+                   dtype=dtype)#tensorrt_llm.str_dtype_to_trt(dtype))
+        y = Tensor(trt_tensor=y_data,
+                   shape=y_data.shape,
+                   dtype=dtype)#tensorrt_llm.str_dtype_to_trt(dtype))
+        output = tensorrt_llm.functional.matmul(x, y).trt_tensor
+            #output.name = 'output'
+            #network.mark_output(output)
 
-        build_engine = EngineFromNetwork((builder.trt_builder, net.trt_network))
-        with TrtRunner(build_engine) as runner:
-            outputs = runner.infer(feed_dict={
-                'x': x_data.numpy(),
-                'y': y_data.numpy(),
-            })
+        #build_engine = EngineFromNetwork((builder.trt_builder, net.trt_network))
+        #with TrtRunner(build_engine) as runner:
+        #    outputs = runner.infer(feed_dict={
+        #        'x': x_data.numpy(),
+        #        'y': y_data.numpy(),
+        #    })
 
         ref = torch.matmul(x_data, y_data)
-        np.testing.assert_allclose(ref.cpu().numpy(),
-                                   outputs['output'],
-                                   atol=1e-5)
+        np.testing.assert_allclose(ref.cpu().numpy(), output.cpu().numpy(), atol=1e-05)
+                                   #outputs['output'],
+                                   #atol=1e-5)
+if __name__ == "__main__":
+    unittest.main()
