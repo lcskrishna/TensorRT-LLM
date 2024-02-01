@@ -39,7 +39,7 @@ class TestFunctional(unittest.TestCase):
         x = Tensor(trt_tensor=x_data,
                    shape=x_data.shape,
                    dtype=dtype)
-        output = tensorrt_llm.functional.cast(x, 'float32')#.trt_tensor
+        output = tensorrt_llm.functional.cast(x, 'float32').trt_tensor
         #output.name = 'output'
         #network.mark_output(output)
 

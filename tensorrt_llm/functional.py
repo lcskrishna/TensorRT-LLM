@@ -271,7 +271,10 @@ class Tensor(object):
         Set the type of the elements in the tensor.
         '''
         if dtype is not None:
-            self.trt_tensor.type(str_dtype_to_torch(dtype))
+            if isinstance(dtype, torch.dtype):
+                self.trt_tensor.type(dtype)
+            elif isinstance(dtype, str):
+                self.trt_tensor.type(str_dtype_to_torch(dtype))
 
     @property
     def shape(self):
@@ -506,43 +509,45 @@ class Tensor(object):
 
     # graph writer related functions
 
-    #def get_parent(self):
-    #    ''' Get the layer that produces this tensor.  '''
-    #    return self.network.get_tensor_parent(self)
+    def get_parent(self):
+        ''' Get the layer that produces this tensor.  '''
+        #return self.network.get_tensor_parent(self)
+        return None
 
-    #def get_users(self):
-    #    ''' Get the layers that use this tensor as an input.  '''
-    #    return self.network.get_tensor_users(self)
+    def get_users(self):
+        ''' Get the layers that use this tensor as an input.  '''
+        #return self.network.get_tensor_users(self)
+        return None
 
-    #def replace_all_uses_with(self, new_tensor):
-    #    '''
-    #    Replace all uses of this tensor as an input to consumer layers
-    #    '''
+    def replace_all_uses_with(self, new_tensor):
+        '''
+        Replace all uses of this tensor as an input to consumer layers
+        '''
 
-    #    self.network.is_graph_altered = True
-    #    users = self.get_users()
-    #    for user in users:
-    #        inputs_changed = 0
-    #        for i in range(user.num_inputs):
-    #            if user.get_inputs(i)[0].trt_tensor is self.trt_tensor:
-    #                inputs_changed += 1
-    #                user.set_input(i, new_tensor.trt_tensor)
-    #        assert inputs_changed >= 1, "Tensor not found in layer inputs"
+        self.network.is_graph_altered = True
+        users = self.get_users()
+        for user in users:
+            inputs_changed = 0
+            for i in range(user.num_inputs):
+                if user.get_inputs(i)[0].trt_tensor is self.trt_tensor:
+                    inputs_changed += 1
+                    user.set_input(i, new_tensor.trt_tensor)
+            assert inputs_changed >= 1, "Tensor not found in layer inputs"
 
-    #        # update the FLayerMetadata as well
-    #        flayer = gw.FLayerInfoMemo.instance().get(user.name)
-    #        flayer and flayer.replace_input_with(self, new_tensor)
+            # update the FLayerMetadata as well
+            flayer = gw.FLayerInfoMemo.instance().get(user.name)
+            flayer and flayer.replace_input_with(self, new_tensor)
 
-    #def is_trt_wrapper(self):
-    #    '''
-    #    Check if there is a trt.ITensor member inside, which is required for
-    #    graph rewriter. In order to differentiate usages, it may be necessary
-    #    to have an inheritance hierarchy.
-    #    '''
-    #    if hasattr(self, 'trt_tensor'):
-    #        return True
-    #    else:
-    #        return False
+    def is_trt_wrapper(self):
+        '''
+        Check if there is a trt.ITensor member inside, which is required for
+        graph rewriter. In order to differentiate usages, it may be necessary
+        to have an inheritance hierarchy.
+        '''
+        if hasattr(self, 'trt_tensor'):
+            return True
+        else:
+            return False
 
     def __hash__(self):
         if self.is_trt_wrapper():
@@ -703,11 +708,11 @@ def activation(input: Tensor, act_type: 'str') -> Tensor:
     #layer = default_trtnet().add_activation(input.trt_tensor, act_type)
     #return _create_tensor(layer.get_output(0), layer)
     if act_type == 'relu':
-        return torch.nn.functional.relu(input.trt_tensor)
+        return _create_tensor(trt_tensor=torch.nn.functional.relu(input.trt_tensor))
     elif act_type == 'tanh':
-        return torch.tanh(input.trt_tensor)
+        return _create_tensor(trt_tensor=torch.tanh(input.trt_tensor))
     elif act_type == 'sigmoid':
-        return torch.sigmoid(input.trt_tensor)
+        return _create_tensor(torch.sigmoid(input.trt_tensor))
     else:
         raise Exception("ERROR: unsupported activation type {}".format(act_type))
 
@@ -729,16 +734,19 @@ def clip(input: Tensor, alpha: float, beta: float) -> Tensor:
     Returns:
         The tensor produced by the activation layer.
     '''
-    layer = default_trtnet().add_activation(input.trt_tensor,
-                                            trt.ActivationType.CLIP)
-    layer.alpha = alpha
-    layer.beta = beta
-    return _create_tensor(layer.get_output(0), layer)
+    #layer = default_trtnet().add_activation(input.trt_tensor,
+    #                                        trt.ActivationType.CLIP)
+    #layer.alpha = alpha
+    #layer.beta = beta
+    return _create_tensor(torch.clip(input.trt_tensor, alpha, beta))
 
 
-relu = partial(activation, act_type=trt.ActivationType.RELU)
-tanh = partial(activation, act_type=trt.ActivationType.TANH)
-sigmoid = partial(activation, act_type=trt.ActivationType.SIGMOID)
+#relu = partial(activation, act_type=trt.ActivationType.RELU)
+#tanh = partial(activation, act_type=trt.ActivationType.TANH)
+#sigmoid = partial(activation, act_type=trt.ActivationType.SIGMOID)
+relu = partial(activation, act_type='relu')
+tanh = partial(activation, act_type='tanh')
+sigmoid = partial(activation, act_type='sigmoid')
 
 
 def silu(input: Tensor) -> Tensor:
@@ -787,7 +795,10 @@ def squared_relu(x: Tensor) -> Tensor:
     Returns:
         The tensor produced by the activation layer.
     '''
-    return pow(relu(x), 2.0)
+    relu = relu(x)
+    pow_out = torch.pow(relu.trt_tensor, 2.0)
+    #return pow(relu(x), 2.0)
+    return _create_tensor(pow_out)
 
 
 def cast(input: Tensor, dtype: Union[str, trt.DataType]):
@@ -834,7 +845,7 @@ def cast(input: Tensor, dtype: Union[str, trt.DataType]):
     #    layer.get_output(0).set_dynamic_range(-127, 127)
 
     output = input.cast(cvt_dtype)
-    return output
+    return _create_tensor(output)
 
 
 def flip(input: Tensor, dims: Sequence[int]) -> Tensor:
@@ -859,26 +870,27 @@ def flip(input: Tensor, dims: Sequence[int]) -> Tensor:
     '''
     assert not input.is_dynamic()
 
-    ndim = input.ndim()
+    #ndim = input.ndim()
 
-    for index, value in enumerate(dims):
-        assert -ndim <= value < ndim
-        if -ndim <= value < 0:
-            dims[index] += ndim
+    #for index, value in enumerate(dims):
+    #    assert -ndim <= value < ndim
+    #    if -ndim <= value < 0:
+    #        dims[index] += ndim
 
-    assert len(dims) == len(set(dims))
+    #assert len(dims) == len(set(dims))
 
-    start_values = [
-        input.size()[i] - 1 if i in dims else 0 for i in range(ndim)
-    ]
-    stride_values = [-1 if i in dims else 1 for i in range(ndim)]
+    #start_values = [
+    #    input.size()[i] - 1 if i in dims else 0 for i in range(ndim)
+    #]
+    #stride_values = [-1 if i in dims else 1 for i in range(ndim)]
 
-    layer = default_trtnet().add_slice(input.trt_tensor,
-                                       start=start_values,
-                                       shape=input.size(),
-                                       stride=stride_values)
+    #layer = default_trtnet().add_slice(input.trt_tensor,
+    #                                   start=start_values,
+    #                                   shape=input.size(),
+    #                                   stride=stride_values)
 
-    return _create_tensor(layer.get_output(0), layer)
+    #return _create_tensor(layer.get_output(0), layer)
+    return _create_tensor(torch.flip(input.trt_tensor, dims))
 
 
 def interpolate(input: Tensor,
@@ -913,63 +925,64 @@ def interpolate(input: Tensor,
     if mode == "linear" and input_ndim != 3:
         raise ValueError("linear only supports 3D tensor")
 
-    layer = default_trtnet().add_resize(input.trt_tensor)
+    #layer = default_trtnet().add_resize(input.trt_tensor)
 
-    input_shape = input.size()
+    #input_shape = input.size()
 
-    updated_shape = []
-    if scale_factor:
-        scale_len = 1 if isinstance(scale_factor,
-                                    (float, int)) else len(scale_factor)
-        if scale_len == 1 and isinstance(scale_factor, (float, int)):
-            updated_scale = [scale_factor for _ in range(input_ndim - 2)]
+    #updated_shape = []
+    #if scale_factor:
+    #    scale_len = 1 if isinstance(scale_factor,
+    #                                (float, int)) else len(scale_factor)
+    #    if scale_len == 1 and isinstance(scale_factor, (float, int)):
+    #        updated_scale = [scale_factor for _ in range(input_ndim - 2)]
 
-        else:
-            updated_scale = scale_factor
-        updated_shape = [
-            int(math.floor(updated_scale[i - 2] *
-                           input_shape[i])) if i > 1 else input_shape[i]
-            for i in range(input_ndim)
-        ]
+    #    else:
+    #        updated_scale = scale_factor
+    #    updated_shape = [
+    #        int(math.floor(updated_scale[i - 2] *
+    #                       input_shape[i])) if i > 1 else input_shape[i]
+    #        for i in range(input_ndim)
+    #    ]
 
-    else:
-        size_len = 1 if isinstance(size, int) else len(size)
-        assert size_len == input_ndim - 2
-        if size_len == 1 and isinstance(size, int):
-            updated_size = [size for _ in range(input_ndim - 2)]
-        else:
-            updated_size = size
+    #else:
+    #    size_len = 1 if isinstance(size, int) else len(size)
+    #    assert size_len == input_ndim - 2
+    #    if size_len == 1 and isinstance(size, int):
+    #        updated_size = [size for _ in range(input_ndim - 2)]
+    #    else:
+    #        updated_size = size
 
-        updated_shape = [
-            input_shape[i] if i < 2 else updated_size[i - 2]
-            for i in range(input_ndim)
-        ]
-    layer.shape = updated_shape
+    #    updated_shape = [
+    #        input_shape[i] if i < 2 else updated_size[i - 2]
+    #        for i in range(input_ndim)
+    #    ]
+    #layer.shape = updated_shape
 
-    if mode in ['nearest', 'nearest-exact'] or mode is None:
-        layer.resize_mode = trt.InterpolationMode.NEAREST
-        layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ASYMMETRIC
-    elif mode in ['linear', 'bilinear', 'trilinear']:
-        layer.resize_mode = trt.InterpolationMode.LINEAR
-        if align_corners:
-            layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ALIGN_CORNERS
-        else:
-            layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
-        # TODO, need to confirm the align_corners effect on bilinear mode.
-        if mode == 'bilinear':
-            layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
+    #if mode in ['nearest', 'nearest-exact'] or mode is None:
+    #    layer.resize_mode = trt.InterpolationMode.NEAREST
+    #    layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ASYMMETRIC
+    #elif mode in ['linear', 'bilinear', 'trilinear']:
+    #    layer.resize_mode = trt.InterpolationMode.LINEAR
+    #    if align_corners:
+    #        layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ALIGN_CORNERS
+    #    else:
+    #        layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
+    #    # TODO, need to confirm the align_corners effect on bilinear mode.
+    #    if mode == 'bilinear':
+    #        layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
 
-    elif mode in ['bicubic']:
-        layer.resize_mode = trt.InterpolationMode.CUBIC
+    #elif mode in ['bicubic']:
+    #    layer.resize_mode = trt.InterpolationMode.CUBIC
 
-        layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
+    #    layer.coordinate_transformation = trt.ResizeCoordinateTransformation.HALF_PIXEL
 
-    else:
-        layer.resize_mode = trt.InterpolationMode.NEAREST
-        layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ASYMMETRIC
+    #else:
+    #    layer.resize_mode = trt.InterpolationMode.NEAREST
+    #    layer.coordinate_transformation = trt.ResizeCoordinateTransformation.ASYMMETRIC
 
-    return _create_tensor(layer.get_output(0), layer)
-
+    #return _create_tensor(layer.get_output(0), layer)
+    return _create_tensor(torch.nn.functional.interpolate(input.trt_tensor, size, scale-factor, mode, 
+                                                            align_corners, recompute_scale_factor, antialias))
 
 def matmul(input: Tensor,
            mat2: Tensor,
