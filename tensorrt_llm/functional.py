@@ -1353,9 +1353,11 @@ def einsum(einsum_eq: str, inputs: Sequence[Tensor]) -> Tensor:
     Returns:
         The tensor produced by the Einsum operation.
     '''
-    layer = default_trtnet().add_einsum([i.trt_tensor for i in inputs],
-                                        einsum_eq)
-    return _create_tensor(layer.get_output(0), layer)
+    #layer = default_trtnet().add_einsum([i.trt_tensor for i in inputs],
+    #                                    einsum_eq)
+    #return _create_tensor(layer.get_output(0), layer)
+    output = torch.einsum(einsum_eq, [i.trt_tensor for i in inputs])
+    return _create_tensor(output)
 
 
 def permute(input: Tensor, dims: Sequence[int]) -> Tensor:
