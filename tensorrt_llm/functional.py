@@ -475,7 +475,7 @@ class Tensor(object):
         '''
         Returns the rank (i.e. the number of dimensions) of the tensor.
         '''
-        return len(self.trt_tensor.shape)
+        return len(self.trt_tensor.dim())
 
     def ndim(self):
         '''
@@ -1064,17 +1064,19 @@ def constant(ndarray: np.ndarray) -> Tensor:
     Returns:
         The tensor produced by the inserted layer.
     '''
-    weights = trt.Weights(np_dtype_to_trt(ndarray.dtype), ndarray.ctypes.data,
-                          ndarray.size)
-    # Prevent underlying numpy array from going out of scope
-    default_net().register_ndarray(ndarray)
-    layer = default_trtnet().add_constant(trt.Dims(ndarray.shape), weights)
-    if not default_net().strongly_typed:
-        layer.set_output_type(0, np_dtype_to_trt(ndarray.dtype))
-    tensor = _create_tensor(layer.get_output(0), layer)
-    # TODO: remove this WAR after https://nvbugs/4359151 fixed.
-    set_np_weight(default_trtnet(), layer.name, ndarray)
-    return tensor
+    #weights = trt.Weights(np_dtype_to_trt(ndarray.dtype), ndarray.ctypes.data,
+    #                      ndarray.size)
+    ## Prevent underlying numpy array from going out of scope
+    #default_net().register_ndarray(ndarray)
+    #layer = default_trtnet().add_constant(trt.Dims(ndarray.shape), weights)
+    #if not default_net().strongly_typed:
+    #    layer.set_output_type(0, np_dtype_to_trt(ndarray.dtype))
+    #tensor = _create_tensor(layer.get_output(0), layer)
+    ## TODO: remove this WAR after https://nvbugs/4359151 fixed.
+    #set_np_weight(default_trtnet(), layer.name, ndarray)
+    #return tensor
+    output = torch.from_numpy(ndarray)
+    return _create_tensor(output)
 
 
 # TODO: TensorRT uses sizes of the output dimensions.
@@ -1211,29 +1213,36 @@ def arange(start: Union[Tensor, int], end: Union[Tensor, int],
         The tensor produced by the fill layer. It is a 1D tensor containing
         `end-start` elements of type `dtype`.
     '''
+    #if isinstance(start, int):
+    #    assert isinstance(end, int)
+    #    start = constant(int32_array(start))
+    #    end = constant(int32_array(end))
+    #elif isinstance(start, Tensor):
+    #    assert isinstance(end, Tensor)
+    #else:
+    #    raise TypeError("%s is not supported" % type(start))
+
+    #step = constant(int32_array([1]))
+
+    #num = end - start
+    #num = num.view([1])
+
+    #layer = default_trtnet().add_fill([0], trt.FillOperation.LINSPACE,
+    #                                  trt.int32)
+    #layer.set_input(0, num.trt_tensor)  # rank = 1
+    #layer.set_input(1, start.trt_tensor)  # rank = 0
+    #layer.set_input(2, step.trt_tensor)  # rank = 1
+    #tensor = _create_tensor(layer.get_output(0), layer)
+    #if tensor.dtype != str_dtype_to_trt(dtype):
+    #    tensor = tensor.cast(dtype)
+    #return tensor
     if isinstance(start, int):
         assert isinstance(end, int)
-        start = constant(int32_array(start))
-        end = constant(int32_array(end))
-    elif isinstance(start, Tensor):
-        assert isinstance(end, Tensor)
     else:
         raise TypeError("%s is not supported" % type(start))
 
-    step = constant(int32_array([1]))
-
-    num = end - start
-    num = num.view([1])
-
-    layer = default_trtnet().add_fill([0], trt.FillOperation.LINSPACE,
-                                      trt.int32)
-    layer.set_input(0, num.trt_tensor)  # rank = 1
-    layer.set_input(1, start.trt_tensor)  # rank = 0
-    layer.set_input(2, step.trt_tensor)  # rank = 1
-    tensor = _create_tensor(layer.get_output(0), layer)
-    if tensor.dtype != str_dtype_to_trt(dtype):
-        tensor = tensor.cast(dtype)
-    return tensor
+    output = torch.arange(start=start, end=end, dtype=str_dtype_to_torch(dtype))
+    return _create_tensor(output)
 
 
 def expand(input: Tensor, expand_shape: Tensor) -> Tensor:
@@ -1621,7 +1630,7 @@ def expand_dims_like(left: Union[Tensor, int, float], right: Tensor) -> Tensor:
     if isinstance(left, int):
         left = constant(int32_array([left]))
     elif isinstance(left, float):
-        if isinstance(right, Tensor) and right.dtype == trt.DataType.HALF:
+        if isinstance(right, Tensor) and right.dtype == torch.half:
             left = constant(fp16_array([left]))
         else:
             left = constant(fp32_array([left]))
@@ -2236,13 +2245,16 @@ def embedding(input: Tensor,
     return x
 
 
+#def constant_to_tensor_(input: Union[Tensor, int, float],
+#                        dtype: trt.DataType = trt.float32) -> Tensor:
 def constant_to_tensor_(input: Union[Tensor, int, float],
-                        dtype: trt.DataType = trt.float32) -> Tensor:
+                        dtype: torch.dtype = torch.float) -> Tensor:
     if isinstance(input, int):
         return constant(int32_array([input]))
     elif isinstance(input, float):
-        assert dtype == trt.float32 or dtype == trt.float16
-        if dtype == trt.float32:
+        #assert dtype == trt.float32 or dtype == trt.float16
+        assert dtype == torch.float or dtype == torch.half
+        if dtype == torch.float:
             return constant(fp32_array([input]))
         else:
             return constant(fp16_array([input]))
@@ -2412,9 +2424,11 @@ def where(condition: Union[Tensor, int, float], left: Union[Tensor, int, float],
         right = expand_dims_like(right, largest)
 
     # Insert the operation.
-    layer = default_trtnet().add_select(condition.trt_tensor, left.trt_tensor,
-                                        right.trt_tensor)
-    return _create_tensor(layer.get_output(0), layer)
+    #layer = default_trtnet().add_select(condition.trt_tensor, left.trt_tensor,
+    #                                    right.trt_tensor)
+    #return _create_tensor(layer.get_output(0), layer)
+    output = torch.where(condition.trt_tensor, left.trt_tensor, right.trt_tensor)
+    return _create_tensor(output)
 
 
 def unary(input: Tensor, op: trt.UnaryOperation) -> Tensor:
