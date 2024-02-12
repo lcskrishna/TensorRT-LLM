@@ -53,33 +53,38 @@ class TestFunctional(unittest.TestCase):
                             dtype=tensorrt_llm._utils.str_dtype_to_torch(dtype))
 
         # construct trt network
-        builder = tensorrt_llm.Builder()
-        net = builder.create_network()
-        with tensorrt_llm.net_guard(net):
-            network = tensorrt_llm.default_trtnet()
-            x = Tensor(name='x',
-                       shape=x_shape,
-                       dtype=tensorrt_llm.str_dtype_to_trt(dtype))
+        #builder = tensorrt_llm.Builder()
+        #net = builder.create_network()
+        #with tensorrt_llm.net_guard(net):
+        #    network = tensorrt_llm.default_trtnet()
+        #    x = Tensor(name='x',
+        #               shape=x_shape,
+        #               dtype=tensorrt_llm.str_dtype_to_trt(dtype))
 
-            outputs = tensorrt_llm.functional.split(x, split_size_or_sections,
-                                                    dim)
-            for i in range(len(outputs)):
-                output = outputs[i].trt_tensor
-                output.name = f'output_{i}'
-                network.mark_output(output)
+        #    outputs = tensorrt_llm.functional.split(x, split_size_or_sections,
+        #                                            dim)
+        #    for i in range(len(outputs)):
+        #        output = outputs[i].trt_tensor
+        #        output.name = f'output_{i}'
+        #        network.mark_output(output)
 
-        # trt run
-        build_engine = EngineFromNetwork((builder.trt_builder, net.trt_network))
-        with TrtRunner(build_engine) as runner:
-            outputs = runner.infer(feed_dict={
-                'x': x_data.numpy(),
-            })
+        ## trt run
+        #build_engine = EngineFromNetwork((builder.trt_builder, net.trt_network))
+        #with TrtRunner(build_engine) as runner:
+        #    outputs = runner.infer(feed_dict={
+        #        'x': x_data.numpy(),
+        #    })
+        x = Tensor(trt_tensor=x_data, shape=x_shape, dtype=dtype)
+        outputs = tensorrt_llm.functional.split(x, split_size_or_sections, dim)
 
         # pytorch run
         ref_outputs = torch.split(x_data, split_size_or_sections, dim)
 
         # compare diff
-        assert len(outputs.keys()) == len(ref_outputs)
+        assert len(outputs) == len(ref_outputs)
         for i in range(len(ref_outputs)):
             np.testing.assert_allclose(ref_outputs[i].cpu().numpy(),
-                                       outputs[f'output_{i}'])
+                                       outputs[i].trt_tensor.cpu().numpy())
+
+if __name__ == "__main__":
+    unittest.main()

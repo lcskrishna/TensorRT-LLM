@@ -1384,10 +1384,12 @@ def permute(input: Tensor, dims: Sequence[int]) -> Tensor:
     Returns:
         The tensor produced by the permutation layer.
     '''
-    dims = dim_resolve_negative(tuple(dims), input.ndim())
-    layer = default_trtnet().add_shuffle(input.trt_tensor)
-    layer.second_transpose = dims
-    return _create_tensor(layer.get_output(0), layer)
+    #dims = dim_resolve_negative(tuple(dims), input.ndim())
+    #layer = default_trtnet().add_shuffle(input.trt_tensor)
+    #layer.second_transpose = dims
+    #return _create_tensor(layer.get_output(0), layer)
+    output = torch.permute(input.trt_tensor, [i for i in dims])
+    return _create_tensor(output)
 
 
 def transpose(input: Tensor, dim0: int, dim1: int) -> Tensor:
@@ -2976,41 +2978,43 @@ def split(tensor: Tensor,
     Returns:
         The list of tensors produced by the different operations.
     '''
-    assert not tensor.is_dynamic(dim)
+    #assert not tensor.is_dynamic(dim)
 
-    ndim = tensor.ndim()
-    if dim < 0:
-        dim += ndim
-    dim_value = tensor.size()[dim]
-    starts = [constant(int32_array([0])) for _ in range(ndim)]
-    sizes = [shape(tensor, i) for i in range(ndim)]
+    #ndim = tensor.ndim()
+    #if dim < 0:
+    #    dim += ndim
+    #dim_value = tensor.size()[dim]
+    #starts = [constant(int32_array([0])) for _ in range(ndim)]
+    #sizes = [shape(tensor, i) for i in range(ndim)]
 
-    if isinstance(split_size_or_sections, int):
-        # TODO: support non-divisible cases
-        assert dim_value % split_size_or_sections == 0
-        num_sections = dim_value // split_size_or_sections
-        sizes[dim] = constant(int32_array([split_size_or_sections]))
+    #if isinstance(split_size_or_sections, int):
+    #    # TODO: support non-divisible cases
+    #    assert dim_value % split_size_or_sections == 0
+    #    num_sections = dim_value // split_size_or_sections
+    #    sizes[dim] = constant(int32_array([split_size_or_sections]))
 
-        outputs = []
-        for i in range(num_sections):
-            starts[dim] = constant(int32_array([split_size_or_sections * i]))
-            outputs.append(slice(tensor, concat(starts), concat(sizes)))
-        return outputs
-    else:
-        total_size = 0
-        for i in split_size_or_sections:
-            total_size += i
-        assert dim_value == total_size
-        num_sections = len(split_size_or_sections)
+    #    outputs = []
+    #    for i in range(num_sections):
+    #        starts[dim] = constant(int32_array([split_size_or_sections * i]))
+    #        outputs.append(slice(tensor, concat(starts), concat(sizes)))
+    #    return outputs
+    #else:
+    #    total_size = 0
+    #    for i in split_size_or_sections:
+    #        total_size += i
+    #    assert dim_value == total_size
+    #    num_sections = len(split_size_or_sections)
 
-        outputs = []
-        for i in range(num_sections):
-            if i > 0:
-                starts[dim] = starts[dim] + sizes[dim]
-            sizes[dim] = constant(int32_array([split_size_or_sections[i]]))
-            outputs.append(slice(tensor, concat(starts), concat(sizes)))
-        return outputs
-
+    #    outputs = []
+    #    for i in range(num_sections):
+    #        if i > 0:
+    #            starts[dim] = starts[dim] + sizes[dim]
+    #        sizes[dim] = constant(int32_array([split_size_or_sections[i]]))
+    #        outputs.append(slice(tensor, concat(starts), concat(sizes)))
+    #    return outputs
+    outputs = torch.split(tensor.trt_tensor, split_size_or_sections, dim)
+    output_list = [_create_tensor(output) for output in outputs]
+    return output_list
 
 def chunk(tensor: Tensor, chunks: int, dim: int = 0) -> Tensor:
     '''
