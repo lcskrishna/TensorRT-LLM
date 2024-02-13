@@ -1453,22 +1453,25 @@ def view(input: Tensor,
     '''
 
     # TensorRT demands that at most one dimension is permitted to be specified as -1
-    def assert_no_more_than_one_inferred_dim(list):
-        inferred_dim_list = [i for i in list if i == -1]
-        assert len(inferred_dim_list) <= 1
+    #def assert_no_more_than_one_inferred_dim(list):
+    #    inferred_dim_list = [i for i in list if i == -1]
+    #    assert len(inferred_dim_list) <= 1
 
-    layer = default_trtnet().add_shuffle(input.trt_tensor)
-    layer.zero_is_placeholder = zero_is_placeholder
+    #layer = default_trtnet().add_shuffle(input.trt_tensor)
+    #layer.zero_is_placeholder = zero_is_placeholder
+    #if isinstance(shape, Tensor):
+    #    assert_no_more_than_one_inferred_dim(shape.shape)
+    #    layer.set_input(1, shape.trt_tensor)
+    #elif isinstance(shape, (list, tuple)):
+    #    assert_no_more_than_one_inferred_dim(shape)
+    #    layer.reshape_dims = tuple(shape)
+    #else:
+    #    raise TypeError("%s is not supported" % type(shape))
+    #return _create_tensor(layer.get_output(0), layer)
     if isinstance(shape, Tensor):
-        assert_no_more_than_one_inferred_dim(shape.shape)
-        layer.set_input(1, shape.trt_tensor)
-    elif isinstance(shape, (list, tuple)):
-        assert_no_more_than_one_inferred_dim(shape)
-        layer.reshape_dims = tuple(shape)
-    else:
-        raise TypeError("%s is not supported" % type(shape))
-    return _create_tensor(layer.get_output(0), layer)
-
+        raise TypeError("Tensor shape is not supported")
+    output = input.view(shape)
+    return _create_tensor(output)
 
 def expand_dims(input: Tensor, dim: Union[int, Sequence[int]]) -> Tensor:
     '''
@@ -2049,9 +2052,12 @@ def concat(inputs: Sequence[Union[Tensor, int]], dim: int = 0) -> Tensor:
         else:
             tmp.append(i)
 
-    layer = default_trtnet().add_concatenation([i.trt_tensor for i in tmp])
-    layer.axis = dim
-    return _create_tensor(layer.get_output(0), layer)
+    input_list = [i.trt_tensor for i in tmp]
+    output = torch.concat(input_list, dim)
+    return _create_tensor(output)
+    #layer = default_trtnet().add_concatenation([i.trt_tensor for i in tmp])
+    #layer.axis = dim
+    #return _create_tensor(layer.get_output(0), layer)
 
 
 def softmax(input: Tensor, dim: Optional[int] = None) -> Tensor:
@@ -2190,63 +2196,66 @@ def embedding(input: Tensor,
     '''
 
     # Distribute embedding lookup table across multiple GPU
-    if tp_size > 1 and tp_group is not None:
-        if sharding_dim == 0:  # TP on vocab_size dimension
-            if tp_rank == None:
-                raise ValueError(
-                    "Rank cannot be none for tensor parallelism on vocab dim")
+    #if tp_size > 1 and tp_group is not None:
+    #    if sharding_dim == 0:  # TP on vocab_size dimension
+    #        if tp_rank == None:
+    #            raise ValueError(
+    #                "Rank cannot be none for tensor parallelism on vocab dim")
 
-            if default_net().plugin_config.lookup_plugin:
-                x = _lookup_plugin(input, weight, tp_rank)
-                x = allreduce(x, tp_group)
-            else:
-                shape_weight = shape(weight)
-                vocab_size = slice(shape_weight, starts=[0], sizes=[1])
-                tmp_input = input - vocab_size * tp_rank
+    #        if default_net().plugin_config.lookup_plugin:
+    #            x = _lookup_plugin(input, weight, tp_rank)
+    #            x = allreduce(x, tp_group)
+    #        else:
+    #            shape_weight = shape(weight)
+    #            vocab_size = slice(shape_weight, starts=[0], sizes=[1])
+    #            tmp_input = input - vocab_size * tp_rank
 
-                # Identify the valid indices
-                is_qualified = op_and(tmp_input >= 0, tmp_input < vocab_size)
-                is_qualified_expand = expand_dims(is_qualified,
-                                                  [is_qualified.ndim()])
+    #            # Identify the valid indices
+    #            is_qualified = op_and(tmp_input >= 0, tmp_input < vocab_size)
+    #            is_qualified_expand = expand_dims(is_qualified,
+    #                                              [is_qualified.ndim()])
 
-                # Replace the invalid ones to zero
-                placeholder_input = where(is_qualified, tmp_input, 0)
+    #            # Replace the invalid ones to zero
+    #            placeholder_input = where(is_qualified, tmp_input, 0)
 
-                # Get the temporal results
-                layer = default_trtnet().add_gather(
-                    weight.trt_tensor, placeholder_input.trt_tensor, 0)
-                tmp_output = _create_tensor(layer.get_output(0), layer)
+    #            # Get the temporal results
+    #            layer = default_trtnet().add_gather(
+    #                weight.trt_tensor, placeholder_input.trt_tensor, 0)
+    #            tmp_output = _create_tensor(layer.get_output(0), layer)
 
-                # Set zero for invalid results
-                placeholder_tmp = cast(is_qualified_expand, tmp_output.dtype)
-                placeholder = placeholder_tmp - placeholder_tmp
-                x = where(is_qualified_expand, tmp_output, placeholder)
+    #            # Set zero for invalid results
+    #            placeholder_tmp = cast(is_qualified_expand, tmp_output.dtype)
+    #            placeholder = placeholder_tmp - placeholder_tmp
+    #            x = where(is_qualified_expand, tmp_output, placeholder)
 
-                # Use all reduce to collect the results
-                x = allreduce(x, tp_group)
+    #            # Use all reduce to collect the results
+    #            x = allreduce(x, tp_group)
 
-        elif sharding_dim == 1:  # TP on hidden dimension
-            layer = default_trtnet().add_gather(weight.trt_tensor,
-                                                input.trt_tensor, 0)
-            x = _create_tensor(layer.get_output(0), layer)
+    #    elif sharding_dim == 1:  # TP on hidden dimension
+    #        layer = default_trtnet().add_gather(weight.trt_tensor,
+    #                                            input.trt_tensor, 0)
+    #        x = _create_tensor(layer.get_output(0), layer)
 
-            # [dim0, local_dim] -> [dim0 * tp_size, local_dim] --> [dim0, local_dim * tp_size]
-            x = allgather(x, tp_group, gather_dim=-1)
+    #        # [dim0, local_dim] -> [dim0 * tp_size, local_dim] --> [dim0, local_dim * tp_size]
+    #        x = allgather(x, tp_group, gather_dim=-1)
 
-        else:
-            raise ValueError(
-                'Tensor Parallelism only support splitting Embedding lookup along hidden (sharding_dim==1) and vocab (sharding_dim==0) dimensionis'
-            )
+    #    else:
+    #        raise ValueError(
+    #            'Tensor Parallelism only support splitting Embedding lookup along hidden (sharding_dim==1) and vocab (sharding_dim==0) dimensionis'
+    #        )
 
-    # Store embedding lookup table as a whole
-    else:
-        if default_net().plugin_config.lookup_plugin:
-            x = _lookup_plugin(input, weight, rank=0)
-        else:
-            layer = default_trtnet().add_gather(weight.trt_tensor,
-                                                input.trt_tensor, 0)
-            x = _create_tensor(layer.get_output(0), layer)
-    return x
+    ## Store embedding lookup table as a whole
+    #else:
+    #    if default_net().plugin_config.lookup_plugin:
+    #        x = _lookup_plugin(input, weight, rank=0)
+    #    else:
+    #        layer = default_trtnet().add_gather(weight.trt_tensor,
+    #                                            input.trt_tensor, 0)
+    #        x = _create_tensor(layer.get_output(0), layer)
+    #return x
+    embedding_module = torch.nn.Embedding.from_pretrained(weight.trt_tensor)
+    output = embedding_module(input.trt_tensor)
+    return _create_tensor(output)
 
 
 #def constant_to_tensor_(input: Union[Tensor, int, float],

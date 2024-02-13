@@ -86,37 +86,40 @@ class TestFunctional(unittest.TestCase):
         #         precision='float16' if fp16 else 'float32',
         #         timing_cache=timing_cache)
 
-        net = builder.create_network()
-        if use_lookup_plugin:
-            net.plugin_config.set_lookup_plugin(dtype)
+        #net = builder.create_network()
+        #if use_lookup_plugin:
+        #    net.plugin_config.set_lookup_plugin(dtype)
 
-        with tensorrt_llm.net_guard(net):
-            network = tensorrt_llm.default_trtnet()
-            index = Tensor(name='index',
-                           shape=index_data.shape,
-                           dtype=tensorrt_llm.str_dtype_to_trt('int32'))
+        #with tensorrt_llm.net_guard(net):
+        #    network = tensorrt_llm.default_trtnet()
+        #    index = Tensor(name='index',
+        #                   shape=index_data.shape,
+        #                   dtype=tensorrt_llm.str_dtype_to_trt('int32'))
 
-            weight = Tensor(name='weight',
-                            shape=weight_data.shape,
-                            dtype=tensorrt_llm.str_dtype_to_trt(dtype))
+        #    weight = Tensor(name='weight',
+        #                    shape=weight_data.shape,
+        #                    dtype=tensorrt_llm.str_dtype_to_trt(dtype))
 
-            output = tensorrt_llm.functional.embedding(input=index,
-                                                       weight=weight)
+        #    output = tensorrt_llm.functional.embedding(input=index,
+        #                                               weight=weight)
 
-            output = output.trt_tensor
-            output.name = 'output'
-            network.mark_output(output)
+        #    output = output.trt_tensor
+        #    output.name = 'output'
+        #    network.mark_output(output)
 
-        # trt run
-        build_engine = EngineFromNetwork(
-            (builder.trt_builder, net.trt_network),
-            config=CreateConfig(fp16=(dtype == 'float16')))
+        ## trt run
+        #build_engine = EngineFromNetwork(
+        #    (builder.trt_builder, net.trt_network),
+        #    config=CreateConfig(fp16=(dtype == 'float16')))
 
-        with TrtRunner(build_engine) as runner:
-            outputs = runner.infer(feed_dict={
-                'index': index_np,
-                'weight': weight_np
-            })
+        #with TrtRunner(build_engine) as runner:
+        #    outputs = runner.infer(feed_dict={
+        #        'index': index_np,
+        #        'weight': weight_np
+        #    })
+        index = Tensor(trt_tensor=index_data, shape=index_data.shape, dtype='int32')
+        weight = Tensor(trt_tensor=weight_data, shape=weight_data.shape, dtype=dtype)
+        output = tensorrt_llm.functional.embedding(input=index, weight=weight)         
 
         # pytorch run
         embedding = torch.nn.Embedding.from_pretrained(weight_data)
@@ -124,5 +127,9 @@ class TestFunctional(unittest.TestCase):
 
         # compare diff
         np.testing.assert_allclose(ref.cpu().numpy(),
-                                   outputs['output'],
+                                   #outputs['output'],
+                                   output.trt_tensor.cpu().numpy(),
                                    atol=1e-3)
+
+if __name__ == '__main__':
+    unittest.main()
