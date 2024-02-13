@@ -4115,17 +4115,18 @@ def repeat_interleave(tensor: Tensor, repeats: int, dim: int) -> Tensor:
 
     TODO: Allow repeats to be a list of integers and dim to be unspecified.
     '''
-    expanded_tensor = expand_dims(tensor, dim + 1)
-    tile_output_size = concat([
-        repeats if i == (dim + 1) else shape(expanded_tensor, i)
-        for i in range(expanded_tensor.ndim())
-    ])
-    tile = expand(expanded_tensor, tile_output_size)
-    tile_reshape_size = [shape(tensor, i) for i in range(tensor.ndim())]
-    tile_reshape_size[dim] = tile_reshape_size[dim] * repeats
-    tensor = tile.view(concat(tile_reshape_size))
-    return tensor
-
+    #expanded_tensor = expand_dims(tensor, dim + 1)
+    #tile_output_size = concat([
+    #    repeats if i == (dim + 1) else shape(expanded_tensor, i)
+    #    for i in range(expanded_tensor.ndim())
+    #])
+    #tile = expand(expanded_tensor, tile_output_size)
+    #tile_reshape_size = [shape(tensor, i) for i in range(tensor.ndim())]
+    #tile_reshape_size[dim] = tile_reshape_size[dim] * repeats
+    #tensor = tile.view(concat(tile_reshape_size))
+    #return tensor
+    output = torch.repeat_interleave(tensor.trt_tensor, repeats, dim=dim)
+    return _create_tensor(output)
 
 def generate_alibi_slopes(num_heads: int,
                           dtype: trt.DataType = trt.float32,
